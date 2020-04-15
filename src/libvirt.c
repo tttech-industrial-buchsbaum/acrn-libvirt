@@ -87,9 +87,6 @@
 #ifdef WITH_BHYVE
 # include "bhyve/bhyve_driver.h"
 #endif
-#ifdef WITH_ACRN
-# include "acrn/acrn_driver.h"
-#endif
 
 #define VIR_FROM_THIS VIR_FROM_NONE
 
@@ -320,10 +317,6 @@ virGlobalInit(void)
     if (xenapiRegister() == -1)
         goto error;
 # endif
-#ifdef WITH_ACRN
-    if (acrnRegister() == -1)
-	goto error;
-#endif
 #endif
 #ifdef WITH_REMOTE
     if (remoteRegister() == -1)
@@ -990,6 +983,9 @@ virConnectOpenInternal(const char *name,
 #endif
 #ifndef WITH_VZ
              STRCASEEQ(ret->uri->scheme, "parallels") ||
+#endif
+#ifndef WITH_ACRN
+             STRCASEEQ(ret->uri->scheme, "acrn") ||
 #endif
              false)) {
             virReportErrorHelper(VIR_FROM_NONE, VIR_ERR_CONFIG_UNSUPPORTED,

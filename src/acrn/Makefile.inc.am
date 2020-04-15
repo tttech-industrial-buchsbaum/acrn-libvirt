@@ -11,12 +11,21 @@ EXTRA_DIST += $(ACRN_DRIVER_SOURCES)
 
 
 if WITH_ACRN
-noinst_LTLIBRARIES += libvirt_driver_acrn.la
-libvirt_la_BUILT_LIBADD += libvirt_driver_acrn.la
-libvirt_driver_acrn_la_CFLAGS = \
+noinst_LTLIBRARIES += libvirt_driver_acrn_impl.la
+libvirt_driver_acrn_la_SOURCES =
+libvirt_driver_acrn_la_LIBADD = \
+	libvirt_driver_acrn_impl.la \
+	libvirt.la \
+	../gnulib/lib/libgnu.la \
+	$(NULL)
+mod_LTLIBRARIES += libvirt_driver_acrn.la
+libvirt_driver_acrn_la_LDFLAGS = $(AM_LDFLAGS_MOD_NOUNDEF)
+
+libvirt_driver_acrn_impl_la_CFLAGS = \
 	-I$(srcdir)/conf \
 	$(AM_CFLAGS) \
 	$(NULL)
-libvirt_driver_acrn_la_SOURCES = $(ACRN_DRIVER_SOURCES)
-
+libvirt_driver_acrn_impl_la_LDFLAGS = $(AM_LDFLAGS)
+libvirt_driver_acrn_impl_la_LIBADD = 
+libvirt_driver_acrn_impl_la_SOURCES = $(ACRN_DRIVER_SOURCES)
 endif WITH_ACRN
