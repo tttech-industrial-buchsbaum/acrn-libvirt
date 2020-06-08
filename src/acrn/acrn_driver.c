@@ -2710,6 +2710,8 @@ acrnStateInitialize(bool privileged,
                     virStateInhibitCallback callback ATTRIBUTE_UNUSED,
                     void *opaque ATTRIBUTE_UNUSED)
 {
+    int ret;
+
     if (!privileged) {
         VIR_INFO("Not running privileged, disabling driver");
         return 0;
@@ -2727,8 +2729,15 @@ acrnStateInitialize(bool privileged,
     if (virCapabilitiesGetNodeInfo(&acrn_driver->nodeInfo) < 0)
         goto cleanup;
 
-    if (acrnInitPlatform(&acrn_driver->pi, &acrn_driver->nodeInfo,
-                         &acrn_driver->vcpuAllocMap) < 0)
+    ret = acrnInitPlatform(&acrn_driver->pi, &acrn_driver->nodeInfo,
+        &acrn_driver->vcpuAllocMap);
+    if (ret == -ENODEV) {
+        /* we are not running on an ACRN enabled system */
+        VIR_INFO("ACRN hypervisor not available, disabling driver");
+        ret = 0;
+        goto cleanup_nofail;
+    }
+    if (ret < 0)
         goto cleanup;
 
     if (!(acrn_driver->domains = virDomainObjListNew()))
@@ -2757,8 +2766,10 @@ acrnStateInitialize(bool privileged,
     return 0;
 
 cleanup:
+    ret = -1;
+cleanup_nofail:
     acrnStateCleanup();
-    return -1;
+    return ret;
 }
 
 static virHypervisorDriver acrnHypervisorDriver = {
