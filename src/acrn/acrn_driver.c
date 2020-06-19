@@ -23,6 +23,7 @@
 #include "virfdstream.h"
 #include "virlog.h"
 #include "domain_event.h"
+#include "viraccessapicheck.h"
 #include "acrn_common.h"
 #include "acrn_driver.h"
 #include "acrn_domain.h"
@@ -1391,6 +1392,91 @@ cleanup:
 }
 
 static int
+acrnDomainGetAutostart(virDomainPtr domain, int *autostart)
+{
+    virDomainObjPtr vm;
+    int ret = -1;
+
+    if (!(vm = acrnDomObjFromDomain(domain)))
+        goto cleanup;
+
+    if (virDomainGetAutostartEnsureACL(domain->conn, vm->def) < 0)
+        goto cleanup;
+
+    *autostart = vm->autostart;
+    ret = 0;
+
+ cleanup:
+    if (vm)
+        virObjectUnlock(vm);
+    return ret;
+}
+
+static int
+acrnDomainSetAutostart(virDomainPtr domain, int autostart)
+{
+    virDomainObjPtr vm;
+    char *configFile = NULL;
+    char *autostartLink = NULL;
+    int ret = -1;
+
+    if (!(vm = acrnDomObjFromDomain(domain)))
+        goto cleanup;
+
+    if (virDomainSetAutostartEnsureACL(domain->conn, vm->def) < 0)
+        goto cleanup;
+
+    if (!vm->persistent) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("cannot set autostart for transient domain"));
+        goto cleanup;
+    }
+
+    autostart = (autostart != 0);
+
+    if (vm->autostart != autostart) {
+        if ((configFile = virDomainConfigFile(ACRN_CONFIG_DIR, vm->def->name)) == NULL)
+            goto cleanup;
+        if ((autostartLink = virDomainConfigFile(ACRN_AUTOSTART_DIR, vm->def->name)) == NULL)
+            goto cleanup;
+
+        if (autostart) {
+            if (virFileMakePath(ACRN_AUTOSTART_DIR) < 0) {
+                virReportSystemError(errno,
+                                     _("cannot create autostart directory %s"),
+				     ACRN_AUTOSTART_DIR);
+                goto cleanup;
+            }
+
+            if (symlink(configFile, autostartLink) < 0) {
+                virReportSystemError(errno,
+                                     _("Failed to create symlink '%s' to '%s'"),
+                                     autostartLink, configFile);
+                goto cleanup;
+            }
+        } else {
+            if (unlink(autostartLink) < 0 && errno != ENOENT && errno != ENOTDIR) {
+                virReportSystemError(errno,
+                                     _("Failed to delete symlink '%s'"),
+                                     autostartLink);
+                goto cleanup;
+            }
+        }
+
+        vm->autostart = autostart;
+    }
+
+    ret = 0;
+
+ cleanup:
+    VIR_FREE(configFile);
+    VIR_FREE(autostartLink);
+    if (vm)
+        virObjectUnlock(vm);
+    return ret;
+}
+
+static int
 acrnDomainGetVcpus(virDomainPtr domain,
                    virVcpuInfoPtr info,
                    int maxinfo,
@@ -2643,6 +2729,94 @@ acrnOfflineCpus(int nprocs, virBitmapPtr pcpus, size_t *allocMap)
     return 0;
 }
 
+struct acrnAutostartData {
+	acrnConnectPtr driver;
+	struct acrnVmList *list;
+};
+
+static int
+acrnAutostartDomain(virDomainObjPtr dom, void *opaque)
+{
+    int ret = 0;
+
+    virObjectLock(dom);
+
+    if (dom->autostart && !virDomainObjIsActive(dom)) {
+        struct acrnAutostartData *data = opaque;
+        acrnDomainObjPrivatePtr priv = dom->privateData;
+        ssize_t idx;
+        virObjectEventPtr event;
+        char uuidstr[VIR_UUID_STRING_BUFLEN];
+
+        ret = -1;
+        virResetLastError();
+
+        /* find the allocated VM */
+        if ((idx = acrnFindVm(data->list, priv->hvUUID)) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("vm(%s) not found"),
+                           virUUIDFormat(priv->hvUUID, uuidstr));
+            goto cleanup;
+        }
+
+        if (acrnProcessPrepareDomain(dom, &data->driver->pi,
+                                     &data->list->vm[idx],
+                                     data->driver->vcpuAllocMap) < 0)
+            goto cleanup;
+
+        if (acrnProcessStart(dom) < 0) {
+            acrnFreeVcpus(priv->cpuAffinitySet, data->driver->vcpuAllocMap);
+            goto cleanup;
+        }
+
+        event = virDomainEventLifecycleNewFromObj(
+                            dom,
+                            VIR_DOMAIN_EVENT_STARTED,
+                            VIR_DOMAIN_EVENT_STARTED_BOOTED);
+        if (event) {
+            virObjectEventStateQueue(data->driver->domainEventState, event);
+        }
+
+        ret = 0;
+    }
+
+cleanup:
+    virObjectUnlock(dom);
+    return ret;
+}
+
+static void
+acrnAutostartDomains(acrnConnectPtr driver)
+{
+    struct acrnAutostartData data = {
+        .driver = driver,
+    };
+
+    if (!(data.list = acrnVmListNew()))
+        return;
+
+    acrnDriverLock(driver);
+
+    /* retrieve current platform info */
+    if (acrnGetPlatform(&driver->pi, data.list) < 0)
+        goto cleanup;
+
+    virDomainObjListForEach(driver->domains, acrnAutostartDomain, &data);
+
+cleanup:
+    acrnDriverUnlock(driver);
+    acrnVmListFree(data.list);
+}
+
+static void
+acrnStateAutoStart(void)
+{
+    if (!acrn_driver)
+        return;
+
+    acrnAutostartDomains(acrn_driver);
+}
+
 static int
 acrnInitPlatform(acrnPlatformInfoPtr pi, virNodeInfoPtr nodeInfo,
                  size_t **allocMap, const struct acrnVmList *list)
@@ -2864,6 +3038,8 @@ static virHypervisorDriver acrnHypervisorDriver = {
     .connectBaselineCPU = acrnConnectBaselineCPU, /* 0.0.1 */
     .connectDomainEventRegisterAny = acrnConnectDomainEventRegisterAny, /* 0.0.1 */
     .connectDomainEventDeregisterAny = acrnConnectDomainEventDeregisterAny, /* 0.0.1 */
+    .domainGetAutostart = acrnDomainGetAutostart, /* 0.0.1 */
+    .domainSetAutostart = acrnDomainSetAutostart, /* 0.0.1 */
     .domainOpenConsole = acrnDomainOpenConsole, /* 0.0.1 */
     .domainGetCPUStats = acrnDomainGetCPUStats, /* 0.0.1 */
     .nodeGetCPUMap = acrnNodeGetCPUMap, /* 0.0.1 */
@@ -2876,6 +3052,7 @@ static virConnectDriver acrnConnectDriver = {
 static virStateDriver acrnStateDriver = {
     .name = "ACRN",
     .stateInitialize = acrnStateInitialize,
+    .stateAutoStart = acrnStateAutoStart,
     .stateCleanup = acrnStateCleanup,
 };
 
