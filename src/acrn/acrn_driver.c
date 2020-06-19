@@ -1980,6 +1980,26 @@ cleanup:
 }
 
 static int
+acrnDomainIsPersistent(virDomainPtr domain)
+{
+    virDomainObjPtr obj;
+    int ret = -1;
+
+    if (!(obj = acrnDomObjFromDomain(domain)))
+        goto cleanup;
+
+    if (virDomainIsPersistentEnsureACL(domain->conn, obj->def) < 0)
+        goto cleanup;
+
+    ret = obj->persistent;
+
+ cleanup:
+    if (obj)
+        virObjectUnlock(obj);
+    return ret;
+}
+
+static int
 acrnDomainOpenConsole(virDomainPtr dom,
                       const char *dev_name,
                       virStreamPtr st,
@@ -3038,6 +3058,7 @@ static virHypervisorDriver acrnHypervisorDriver = {
     .connectBaselineCPU = acrnConnectBaselineCPU, /* 0.0.1 */
     .connectDomainEventRegisterAny = acrnConnectDomainEventRegisterAny, /* 0.0.1 */
     .connectDomainEventDeregisterAny = acrnConnectDomainEventDeregisterAny, /* 0.0.1 */
+    .domainIsPersistent = acrnDomainIsPersistent, /* 0.0.1 */
     .domainGetAutostart = acrnDomainGetAutostart, /* 0.0.1 */
     .domainSetAutostart = acrnDomainSetAutostart, /* 0.0.1 */
     .domainOpenConsole = acrnDomainOpenConsole, /* 0.0.1 */
