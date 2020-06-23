@@ -26,6 +26,7 @@ libvirt_driver_acrn_la_LDFLAGS = $(AM_LDFLAGS_MOD_NOUNDEF)
 
 libvirt_driver_acrn_impl_la_CFLAGS = \
 	-I$(srcdir)/conf \
+	-I$(srcdir)/access \
 	$(AM_CFLAGS) \
 	$(NULL)
 libvirt_driver_acrn_impl_la_LDFLAGS = $(AM_LDFLAGS)
