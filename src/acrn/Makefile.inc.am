@@ -29,6 +29,6 @@ libvirt_driver_acrn_impl_la_CFLAGS = \
 	$(AM_CFLAGS) \
 	$(NULL)
 libvirt_driver_acrn_impl_la_LDFLAGS = $(AM_LDFLAGS)
-libvirt_driver_acrn_impl_la_LIBADD = -luuid
+libvirt_driver_acrn_impl_la_LIBADD = -luuid $(LIBXML_LIBS)
 libvirt_driver_acrn_impl_la_SOURCES = $(ACRN_DRIVER_SOURCES)
 endif WITH_ACRN
