@@ -2,6 +2,7 @@
 #define __ACRN_DOMAIN_H__
 
 #include "domain_conf.h"
+#include "acrn_monitor.h"
 
 typedef struct _acrnDomainObjPrivate acrnDomainObjPrivate;
 typedef acrnDomainObjPrivate *acrnDomainObjPrivatePtr;
@@ -13,6 +14,7 @@ struct _acrnDomainObjPrivate {
         char *slave;
     } ttys[4];
     size_t nttys;
+    acrnDomainMonitorPtr mon;
 };
 
 typedef struct _acrnDomainXmlNsDef acrnDomainXmlNsDef;

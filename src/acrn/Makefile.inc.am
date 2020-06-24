@@ -6,6 +6,7 @@ ACRN_DRIVER_SOURCES = \
 	acrn/acrn_domain.c \
 	acrn/acrn_device.h \
 	acrn/acrn_device.c \
+	acrn/acrn_monitor.c \
 	$(NULL)
 
 DRIVER_SOURCE_FILES += $(ACRN_DRIVER_SOURCES)

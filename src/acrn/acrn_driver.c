@@ -1121,43 +1121,66 @@ acrnBuildStartCmd(virDomainObjPtr vm)
     return cmd;
 }
 
+static virCommandPtr
+acrnRunStartCommand(virDomainObjPtr vm)
+{
+    int ret = -1;
+    virCommandPtr cmd;
+
+    cmd = acrnBuildStartCmd(vm);
+    if (!cmd)
+        return NULL;
+
+    virCommandRawStatus(cmd);
+    ret = virCommandRunAsync(cmd, &vm->pid);
+    if (ret < 0) {
+        virCommandFree(cmd);
+        cmd = NULL;
+        virReportSystemError(errno, "%s", _("virCommandRunAsync failed"));
+    }
+
+    return cmd;
+}
+
+static void acrnProcessStopCallback(virDomainObjPtr vm);
+
 static int
 acrnProcessStart(virDomainObjPtr vm)
 {
-    virCommandPtr cmd;
     int ret = -1;
-
-    if (!(cmd = acrnBuildStartCmd(vm)))
-        goto cleanup;
-
-    virCommandDaemonize(cmd);
+    virCommandPtr cmd;
 
     VIR_DEBUG("Starting domain '%s'", vm->def->name);
 
-    if (virCommandRun(cmd, NULL) < 0)
+    cmd = acrnRunStartCommand(vm);
+    if (!cmd)
         goto cleanup;
 
-    /* XXX */
-    if (sscanf(vm->def->name, "vm%d", &vm->def->id) != 1 &&
-        sscanf(vm->def->name, "instance-%d", &vm->def->id) != 1)
-        vm->def->id = 0;
+    ret = acrnDomainMonitorStart(vm, &acrnProcessStopCallback, cmd);
+    if (ret < 0)
+        goto cleanup;
+
+    /* use PID as id */
+    vm->def->id = vm->pid;
 
     virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, VIR_DOMAIN_RUNNING_BOOTED);
-    ret = 0;
+    return 0;
 
 cleanup:
-    virCommandFree(cmd);
-    if (ret < 0) {
-        acrnNetCleanup(vm);
-        acrnTtyCleanup(vm);
-    }
+    if (cmd)
+        virCommandFree(cmd);
+
+    vm->pid = -1;
+    acrnNetCleanup(vm);
+    acrnTtyCleanup(vm);
     return ret;
 }
 
 static virCommandPtr
-acrnBuildStopCmd(virDomainDefPtr def)
+acrnBuildStopCmd(virDomainObjPtr vm)
 {
     virCommandPtr cmd;
+    virDomainDefPtr def = vm->def;
 
     if (!def)
         return NULL;
@@ -1170,20 +1193,25 @@ acrnBuildStopCmd(virDomainDefPtr def)
 }
 
 static int
-acrnProcessStop(virDomainObjPtr vm, int reason, size_t *allocMap)
+acrnRunStopCommand(virDomainObjPtr vm)
 {
-    virDomainDefPtr def = vm->def;
+    int ret;
     virCommandPtr cmd;
+
+    cmd = acrnBuildStopCmd(vm);
+    if (!cmd)
+        return -1;
+
+    ret = virCommandRun(cmd, NULL);
+    virCommandFree(cmd);
+
+    return ret;
+}
+
+static void
+acrnProcessCleanup(virDomainObjPtr vm, int reason, size_t *allocMap)
+{
     acrnDomainObjPrivatePtr priv = vm->privateData;
-    int ret = -1;
-
-    if (!(cmd = acrnBuildStopCmd(def)))
-        goto cleanup;
-
-    VIR_DEBUG("Stopping domain '%s'", def->name);
-
-    if (virCommandRun(cmd, NULL) < 0)
-        goto cleanup;
 
     /* clean up network interfaces */
     acrnNetCleanup(vm);
@@ -1193,13 +1221,37 @@ acrnProcessStop(virDomainObjPtr vm, int reason, size_t *allocMap)
 
     virDomainObjSetState(vm, VIR_DOMAIN_SHUTOFF, reason);
 
-    def->id = -1;
-    ret = 0;
+    vm->pid = -1;
+    vm->def->id = -1;
 
-cleanup:
-    virCommandFree(cmd);
     acrnFreeVcpus(priv->cpuAffinitySet, allocMap);
-    return ret;
+}
+
+static int
+acrnProcessStop(virDomainObjPtr vm, int reason, size_t *allocMap)
+{
+    acrnDomainObjPrivatePtr priv = vm->privateData;
+
+    VIR_DEBUG("Stopping domain '%s'", vm->def->name);
+
+    if (acrnRunStopCommand(vm) < 0)
+        return -1;
+
+    acrnDomainMonitorStop(priv->mon);
+
+    acrnProcessCleanup(vm, reason, allocMap);
+    return 0;
+}
+
+static void
+acrnProcessStopCallback(virDomainObjPtr vm)
+{
+    int reason;
+    acrnDomainObjPrivatePtr priv = vm->privateData;
+    acrnDomainMonitorPtr mon = priv->mon;
+
+    reason = acrnDomainMonitorGetReason(mon);
+    acrnProcessCleanup(vm, reason, acrn_driver->vcpuAllocMap);
 }
 
 static virDomainPtr
