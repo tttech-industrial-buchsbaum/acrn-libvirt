@@ -341,15 +341,12 @@ acrnAllocateVm(virDomainObjListPtr doms, virDomainDefPtr def,
                acrnPlatformInfoPtr pi, struct acrnVmList *vmList,
                unsigned char *uuid)
 {
-    enum acrn_vm_severity severity;
     struct acrnFindUUIDData data;
     virBitmapPtr cpumask = NULL, testmask = NULL;
     ssize_t i, start, candidate = -1;
     size_t nvcpus, maxVcpusFit = 0;
     char *maskstr = NULL;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
-
-    severity = (acrnIsRtvm(def)) ? SEVERITY_RTVM : SEVERITY_STANDARD_VM;
 
     if (def->cpumask) {
         /* prepare a sanitized cpumask */
@@ -378,32 +375,33 @@ acrnAllocateVm(virDomainObjListPtr doms, virDomainDefPtr def,
 
     /* these VMs can fit maxvcpus */
     for (; i < vmList->size; i++) {
-        if (vmList->vm[i].cfg.load_order == POST_LAUNCHED_VM &&
-            vmList->vm[i].cfg.severity == severity) {
-            data.uuid = vmList->vm[i].cfg.uuid;
+        if (vmList->vm[i].cfg.load_order != POST_LAUNCHED_VM)
+            continue;
 
-            if (!virDomainObjListForEach(doms, acrnFindHvUUID, &data)) {
-                if (!cpumask)
-                    goto done;
+        data.uuid = vmList->vm[i].cfg.uuid;
 
-                if (virBitmapCopy(testmask, cpumask) < 0) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("virBitmapCopy failed"));
-                    goto notfound;
-                }
+        if (virDomainObjListForEach(doms, acrnFindHvUUID, &data))
+            continue;
 
-                virBitmapIntersect(testmask, vmList->vm[i].pcpus);
-                nvcpus = virBitmapCountBits(testmask);
+        if (!cpumask)
+            goto done;
 
-                if (nvcpus >= def->maxvcpus)
-                    goto done;
+        if (virBitmapCopy(testmask, cpumask) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("virBitmapCopy failed"));
+            goto notfound;
+        }
 
-                /* search for max fit */
-                if (nvcpus > maxVcpusFit) {
-                    maxVcpusFit = nvcpus;
-                    candidate = i;
-                }
-            }
+        virBitmapIntersect(testmask, vmList->vm[i].pcpus);
+        nvcpus = virBitmapCountBits(testmask);
+
+        if (nvcpus >= def->maxvcpus)
+            goto done;
+
+        /* search for max fit */
+        if (nvcpus > maxVcpusFit) {
+            maxVcpusFit = nvcpus;
+            candidate = i;
         }
     }
 
@@ -411,29 +409,30 @@ acrnAllocateVm(virDomainObjListPtr doms, virDomainDefPtr def,
 
     /* just try to find the best VM available */
     while (i--) {
-        if (vmList->vm[i].cfg.load_order == POST_LAUNCHED_VM &&
-            vmList->vm[i].cfg.severity == severity) {
-            data.uuid = vmList->vm[i].cfg.uuid;
+        if (vmList->vm[i].cfg.load_order != POST_LAUNCHED_VM)
+            continue;
 
-            if (!virDomainObjListForEach(doms, acrnFindHvUUID, &data)) {
-                if (!cpumask)
-                    goto done;
+        data.uuid = vmList->vm[i].cfg.uuid;
 
-                if (virBitmapCopy(testmask, cpumask) < 0) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("virBitmapCopy failed"));
-                    goto notfound;
-                }
+        if (virDomainObjListForEach(doms, acrnFindHvUUID, &data))
+            continue;
 
-                virBitmapIntersect(testmask, vmList->vm[i].pcpus);
-                nvcpus = virBitmapCountBits(testmask);
+        if (!cpumask)
+            goto done;
 
-                /* search for max fit */
-                if (nvcpus >= maxVcpusFit) {
-                    maxVcpusFit = nvcpus;
-                    candidate = i;
-                }
-            }
+        if (virBitmapCopy(testmask, cpumask) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("virBitmapCopy failed"));
+            goto notfound;
+        }
+
+        virBitmapIntersect(testmask, vmList->vm[i].pcpus);
+        nvcpus = virBitmapCountBits(testmask);
+
+        /* search for max fit */
+        if (nvcpus >= maxVcpusFit) {
+            maxVcpusFit = nvcpus;
+            candidate = i;
         }
     }
 

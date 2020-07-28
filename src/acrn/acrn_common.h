@@ -8,14 +8,6 @@
 #define IC_ID_GEN_BASE                  0x0UL
 #define IC_GET_PLATFORM_INFO            _IC_ID(IC_ID, IC_ID_GEN_BASE + 0x03)
 
-/* ACRN guest severity */
-enum acrn_vm_severity {
-    SEVERITY_SAFETY_VM = 0x40U,
-    SEVERITY_RTVM = 0x30U,
-    SEVERITY_SOS = 0x20U,
-    SEVERITY_STANDARD_VM = 0x10U,
-};
-
 enum acrn_vm_load_order {
     PRE_LAUNCHED_VM = 0,
     SOS_VM,
