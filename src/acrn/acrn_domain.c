@@ -30,7 +30,7 @@ acrnDomainDefPostParse(virDomainDefPtr def,
 
 static int
 acrnDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
-                             const virDomainDef *def ATTRIBUTE_UNUSED,
+                             const virDomainDef *def,
                              virCapsPtr caps ATTRIBUTE_UNUSED,
                              unsigned int parseFlags ATTRIBUTE_UNUSED,
                              void *opaque ATTRIBUTE_UNUSED,
@@ -104,6 +104,13 @@ acrnDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                            _("net type %s not supported"),
                            virDomainNetTypeToString(net->type));
             return -1;
+        }
+
+        /* set virtio-net as default if none is given */
+        if (!net->model) {
+            if (VIR_STRDUP(net->model, "virtio") < 0)
+                return -1;
+            VIR_INFO("%s: Using default virtio-net for interface model", def->name);
         }
 
         if (STRNEQ_NULLABLE(net->model, "virtio")) {
