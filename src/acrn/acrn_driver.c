@@ -2995,6 +2995,30 @@ acrnPersistentDomainInit(virDomainObjPtr dom, void *opaque)
 }
 
 static int
+acrnPersistentRtvmDomainInit(virDomainObjPtr dom, void *opaque)
+{
+    int ret = 0;
+
+    if (acrnIsRtvm(dom->def)) {
+        ret = acrnPersistentDomainInit(dom, opaque);
+    }
+
+    return ret;
+}
+
+static int
+acrnPersistentNonRtvmDomainInit(virDomainObjPtr dom, void *opaque)
+{
+    int ret = 0;
+
+    if (!acrnIsRtvm(dom->def)) {
+        ret = acrnPersistentDomainInit(dom, opaque);
+    }
+
+    return ret;
+}
+
+static int
 acrnStateInitialize(bool privileged,
                     virStateInhibitCallback callback ATTRIBUTE_UNUSED,
                     void *opaque ATTRIBUTE_UNUSED)
@@ -3061,8 +3085,16 @@ acrnStateInitialize(bool privileged,
                                        NULL, NULL) < 0)
         goto cleanup;
 
-    if (virDomainObjListForEach(acrn_driver->domains, acrnPersistentDomainInit,
-        list) < 0)
+    /*
+     * Initialize RTVMs *before* any other VMs, since these typically have
+     * their CPUs pinned. To not allocate a VM slot meant for an RTVM
+     * for a non-RTVM initialize them in repective order.
+     */
+    if (virDomainObjListForEach(acrn_driver->domains,
+        acrnPersistentRtvmDomainInit, list) < 0)
+        goto cleanup;
+    if (virDomainObjListForEach(acrn_driver->domains,
+            acrnPersistentNonRtvmDomainInit, list) < 0)
         goto cleanup;
 
     acrnVmListFree(list);
